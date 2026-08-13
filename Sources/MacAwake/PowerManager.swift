@@ -77,8 +77,14 @@ final class PowerManager {
 
     /// 电池 / 电源信息（自然语言格式）
     var batteryInfo: String {
-        let raw = batteryRaw
-        // 例: "-InternalBattery-0 (id=6684771)  28%; discharging; 1:07 remaining present: true"
+        let output = run("/usr/bin/pmset", args: ["-g", "batt"]).output
+        guard let raw = output.split(separator: "\n").last(where: { $0.contains("%") })?
+            .trimmingCharacters(in: .whitespaces) else {
+            // 无电池机型（台式机等）：只显示电源来源
+            return (output.contains("AC Power") || output.contains("AC attached"))
+                ? String(localized: "外接电源") : "?"
+        }
+        // 例: "-InternalBattery-0 (id=6684771)  28%; AC attached; not charging; 1:07 remaining"
         let ns = raw as NSString
         var parts: [String] = []
 
@@ -86,6 +92,7 @@ final class PowerManager {
             parts.append(String(format: String(localized: "电量%d%%"), Int(ns.substring(with: pct.range(at: 1)))!))
         }
 
+        let onAC = output.contains("AC Power") || output.contains("AC attached")
         switch PowerParsing.chargingState(in: raw) {
         case "charging":
             parts.append(String(localized: "充电中"))
@@ -96,7 +103,13 @@ final class PowerManager {
         case "finishing charge":
             parts.append(String(localized: "即将充满"))
         case "not charging":
-            parts.append(String(localized: "未充电"))
+            // 插电未充电（充电切入前的瞬态/优化充电暂停）：显示"外接电源"，与台式机口径一致；
+            // 非插电却报 not charging（电池异常/SMC 误报）时仍如实显示"未充电"（核验 V7）
+            if onAC {
+                parts.append(String(localized: "外接电源"))
+            } else {
+                parts.append(String(localized: "未充电"))
+            }
         default:
             break
         }
