@@ -1,0 +1,28 @@
+# SwiftPM 构建产物
+.build/
+build/
+*.o
+*.swiftmodule
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+xcuserdata/
+
+# 应用产物
+*.app
+*.dmg
+*.zip
+
+# 图标中间产物（由 make-optimized-icon.sh 重新生成）
+Resources/AppIcon.iconset/
+Resources/icon-1024.png
+Resources/designs/
+
+# 日志
+*.log
+Library/Logs/
+
+# macOS
+.DS_Store

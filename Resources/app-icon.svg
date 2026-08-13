@@ -1,0 +1,34 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Subtle top gloss for modern Apple icon feel -->
+    <linearGradient id="gloss-1" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="white" stop-opacity="0.15" />
+      <stop offset="40%" stop-color="white" stop-opacity="0" />
+    </linearGradient>
+    <!-- Mask to create the crescent moon shape -->
+    <mask id="moon-mask-1">
+      <rect width="1024" height="1024" fill="white" />
+      <circle cx="600" cy="480" r="240" fill="black" />
+    </mask>
+  </defs>
+
+  <!-- Base Background -->
+  <rect width="1024" height="1024" rx="230" fill="#6B46C1" />
+  <!-- Gloss Overlay -->
+  <rect width="1024" height="1024" rx="230" fill="url(#gloss-1)" />
+
+  <!-- MacBook (Background Layer) -->
+  <g transform="translate(162, 190) scale(7)">
+    <!-- Screen Frame -->
+    <path fill-rule="evenodd" clip-rule="evenodd" fill="#1B2448" d="M10 62V5a5 5 0 0 1 5-5h70a5 5 0 0 1 5 5v57H10z"/>
+    <!-- Display -->
+    <path fill-rule="evenodd" clip-rule="evenodd" fill="#0E1428" d="M14 4h72v54H14V4z"/>
+    <!-- Base / Keyboard Area -->
+    <path fill-rule="evenodd" clip-rule="evenodd" fill="#2A355E" d="M0 62h100v3c0 2.209-2.791 3-5 3H5c-2.209 0-5-.791-5-3v-3z"/>
+    <!-- Hinge Notch -->
+    <path fill-rule="evenodd" clip-rule="evenodd" fill="#1B2448" d="M59.95 62a2.5 2.5 0 0 1-2.45 2h-15a2.502 2.502 0 0 1-2.45-2h19.9z"/>
+  </g>
+
+  <!-- Crescent Moon (Foreground Layer) -->
+  <circle cx="512" cy="560" r="250" fill="#FFFFFF" mask="url(#moon-mask-1)" />
+</svg>
