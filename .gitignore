@@ -17,7 +17,6 @@ xcuserdata/
 
 # 图标中间产物（由 make-optimized-icon.sh 重新生成）
 Resources/AppIcon.iconset/
-Resources/icon-1024.png
 Resources/designs/
 
 # 日志

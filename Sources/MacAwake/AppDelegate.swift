@@ -1,4 +1,5 @@
 import AppKit
+import MacAwakeCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
@@ -64,11 +65,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     // MARK: - 点击事件（左/右）
 
     @objc private func statusItemClicked(_ sender: Any?) {
-        guard let event = NSApp.currentEvent else { return }
-        if event.type == .rightMouseUp {
-            togglePower()          // 右键：直接切换合盖不休眠
+        let event = NSApp.currentEvent
+        // 右键或 Control+点击：直接切换；其余（含 VoiceOver 等不产生鼠标事件的激活）按左键弹菜单
+        let isRightClick = event?.type == .rightMouseUp
+            || (event?.modifierFlags.contains(.control) == true)
+        if isRightClick {
+            togglePower()
         } else {
-            refreshState()         // 左键：刷新状态后弹菜单
+            // 刷新由 menuWillOpen 统一处理，避免重复读 pmset
             statusMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: statusItem.button?.bounds.height ?? 22), in: statusItem.button)
         }
     }
@@ -106,11 +110,13 @@ extension AppDelegate: NSMenuDelegate {
     private func rebuildMenu() {
         statusMenu.removeAllItems()
 
-        let stateItem = NSMenuItem(
-            title: state == .on ? String(localized: "状态：合盖不休眠（已开启）")
-                                : String(localized: "状态：合盖休眠（默认）"),
-            action: nil, keyEquivalent: ""
-        )
+        let stateTitle: String
+        switch state {
+        case .on: stateTitle = String(localized: "状态：合盖不休眠（已开启）")
+        case .off: stateTitle = String(localized: "状态：合盖休眠（默认）")
+        case .unknown: stateTitle = String(localized: "状态：未知")
+        }
+        let stateItem = NSMenuItem(title: stateTitle, action: nil, keyEquivalent: "")
         stateItem.isEnabled = false
         statusMenu.addItem(stateItem)
 
@@ -143,9 +149,10 @@ extension AppDelegate: NSMenuDelegate {
 
         statusMenu.addItem(.separator())
 
+        // keyEquivalent 对无主菜单的菜单栏 App 无效（核验确认），留空即可
         let quitItem = NSMenuItem(
             title: String(localized: "退出 MacAwake"),
-            action: #selector(quitApp), keyEquivalent: "q"
+            action: #selector(quitApp), keyEquivalent: ""
         )
         quitItem.target = self
         statusMenu.addItem(quitItem)

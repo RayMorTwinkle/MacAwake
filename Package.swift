@@ -7,9 +7,19 @@ let package = Package(
     defaultLocalization: "zh-Hans",
     platforms: [.macOS(.v13)],
     targets: [
+        .target(
+            name: "MacAwakeCore",
+            path: "Sources/MacAwakeCore"
+        ),
         .executableTarget(
             name: "MacAwake",
+            dependencies: ["MacAwakeCore"],
             path: "Sources/MacAwake"
+        ),
+        .executableTarget(
+            name: "MacAwakeTests",
+            dependencies: ["MacAwakeCore"],
+            path: "Tests/MacAwakeTests"
         )
     ]
 )

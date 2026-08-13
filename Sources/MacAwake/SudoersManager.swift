@@ -6,20 +6,31 @@ import Foundation
 enum SudoersManager {
 
     static let sudoersPath = "/etc/sudoers.d/macawake"
-    static let sudoersContent = "\(NSUserName()) ALL=(root) NOPASSWD: /usr/bin/pmset\n"
 
-    /// sudoers 白名单是否已安装
+    /// sudoers 白名单是否已正确安装。
+    /// sudo 会静默忽略属主/权限不合规的 sudoers.d 文件（只打一条警告），
+    /// 所以"文件存在"不等于"规则生效"——属主非 root 或组/全局可写时视为未安装，
+    /// 以便 install() 重写修复，否则 App 会永远卡在"sudo 免密失败"上无法自愈。
     static var isInstalled: Bool {
-        FileManager.default.fileExists(atPath: sudoersPath)
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: sudoersPath) else { return false }
+        let owner = (attrs[.ownerAccountID] as? NSNumber)?.intValue
+        let perms = (attrs[.posixPermissions] as? NSNumber)?.intValue ?? 0
+        return owner == 0 && (perms & 0o022) == 0
     }
 
-/// 引导安装 sudoers（需要管理员权限，会弹密码框）
-/// 用 osascript 以 root 写入文件，保持严格权限 440。
-static func install() -> Result<Void, Error> {
+    /// 引导安装 sudoers（需要管理员权限，会弹密码框）
+    /// 用 osascript 以 root 写入文件，保持严格权限 440。
+    static func install() -> Result<Void, Error> {
         guard !isInstalled else { return .success(()) }
 
-        // 转义用户输入避免注入。NSUserName 通常只有字母数字，但保险起见。
-        let username = NSUserName().replacingOccurrences(of: "'", with: "")
+        // 剔除可能破坏 AppleScript 字符串/shell 单引号的字符。
+        // NSUserName 通常只有字母数字，但保险起见。
+        let username = NSUserName()
+            .replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: "\"", with: "")
+            .replacingOccurrences(of: "\\", with: "")
+            .replacingOccurrences(of: "\n", with: "")
+            .replacingOccurrences(of: "\r", with: "")
         let line = "\(username) ALL=(root) NOPASSWD: /usr/bin/pmset"
         let script = """
         do shell script "printf '%s\\n' '\(line)' > /etc/sudoers.d/macawake && chmod 440 /etc/sudoers.d/macawake && chown root:wheel /etc/sudoers.d/macawake" with administrator privileges
@@ -47,12 +58,5 @@ static func install() -> Result<Void, Error> {
             ))
         }
         return .success(())
-    }
-
-    /// 卸载 sudoers（可选，从 App 内不提供，由卸载脚本处理）
-    static func uninstall() {
-        guard isInstalled else { return }
-        let script = "do shell script \"rm -f /etc/sudoers.d/macawake\" with administrator privileges"
-        _ = NSAppleScript(source: script)?.executeAndReturnError(nil)
     }
 }

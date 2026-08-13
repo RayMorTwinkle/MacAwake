@@ -90,9 +90,14 @@ done
 echo "    10 个尺寸生成完成"
 
 echo "==> pngquant 量化（256 色）"
+# pngquant 失败（缺失/坏图）必须显式中止：位于 && 链非末尾的命令
+# 失败不会触发 set -e，静默跳过会导致最终 icns 未被量化且脚本"成功"退出
+command -v pngquant >/dev/null || { echo "缺少 pngquant：brew install pngquant"; exit 1; }
 for f in "$ICONSET"/*.png; do
   tmp="$f.quantized"
-  pngquant 256 --speed 1 --force --output "$tmp" "$f" >/dev/null 2>&1 && mv "$tmp" "$f"
+  pngquant 256 --speed 1 --force --output "$tmp" "$f" >/dev/null 2>&1 && mv "$tmp" "$f" || {
+    echo "pngquant 失败: $f"; exit 1
+  }
 done
 
 echo "==> 直接组装 icns（绕过 iconutil）"

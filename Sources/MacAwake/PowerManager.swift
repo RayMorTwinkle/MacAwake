@@ -1,34 +1,22 @@
 import Foundation
-
-enum SleepState {
-    case on      // 合盖不休眠（SleepDisabled = 1）
-    case off     // 合盖休眠（默认，SleepDisabled = 0）
-    case unknown
-}
+import MacAwakeCore
 
 /// 电源管理：读取/修改合盖休眠状态。
 /// 底层使用公开的 pmset 命令；修改需要 root（通过 sudoers 白名单免密）。
 final class PowerManager {
 
+    private static let percentPattern = try! NSRegularExpression(pattern: "(\\d+)%")
+    private static let timePattern = try! NSRegularExpression(pattern: "(\\d+):(\\d+) remaining")
+
     /// 读取当前 SleepDisabled 状态（pmset -g 普通用户可读）
     var currentState: SleepState {
-        let output = run("/usr/bin/pmset", args: ["-g"])
-        // 匹配 "SleepDisabled" 后的值（可能用多个空格/制表符分隔）
-        if let line = output.split(separator: "\n").first(where: { $0.contains("SleepDisabled") }) {
-            // 例: "SleepDisabled\t\t1" 或 "SleepDisabled 1"
-            let components = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
-            if let idx = components.firstIndex(where: { $0 == "SleepDisabled" }),
-               idx + 1 < components.count {
-                let value = components[idx + 1]
-                if value == "1" { return .on }
-                if value == "0" { return .off }
-            }
-        }
-        return .unknown
+        PowerParsing.parseSleepDisabled(run("/usr/bin/pmset", args: ["-g"]).output)
     }
 
     /// 设置合盖不休眠。enable = true → 禁用合盖休眠；false → 恢复。
     /// 通过 sudoers 白名单免密执行 pmset。
+    /// 只操作 disablesleep 一项：它已阻止全部睡眠（含合盖），
+    /// 不动用户的 sleep（系统睡眠定时）设置，避免覆盖用户原有配置。
     func setSleepDisabled(_ enable: Bool) -> Result<Void, Error> {
         Logger.info("请求切换: \(enable ? "开启合盖不休眠" : "恢复合盖休眠")")
 
@@ -44,23 +32,31 @@ final class PowerManager {
             }
         }
 
-        // 设置值：-a 应用到所有电源场景；sleep 0 配合禁用
+        // 设置值：-a 应用到所有电源场景
         // 通过 sudo -n 免密执行（依赖 /etc/sudoers.d/macawake 白名单）
         let disablesleep = enable ? "1" : "0"
-        let r1 = run("/usr/bin/sudo", args: ["-n", "/usr/bin/pmset", "-a", "disablesleep", disablesleep])
-        let r2 = run("/usr/bin/sudo", args: ["-n", "/usr/bin/pmset", "-a", "sleep", enable ? "0" : "10"])
-        Logger.info("pmset 执行结果: disablesleep -> \(r1) | sleep -> \(r2)")
-
-        // 校验
-        let newState = currentState
-        let expected: SleepState = enable ? .on : .off
-        guard newState == expected else {
-            let detail = "设置未生效: 期望=\(expected), 实际=\(newState), pmset输出=\(r1) \(r2)"
+        let (exitCode, output) = run("/usr/bin/sudo", args: ["-n", "/usr/bin/pmset", "-a", "disablesleep", disablesleep])
+        Logger.info("pmset 执行结果: disablesleep -> \(output) exit=\(exitCode)")
+        if exitCode != 0 {
+            let detail = "pmset 退出码 \(exitCode): \(output)"
             Logger.error(detail)
             return .failure(NSError(
                 domain: "MacAwake",
                 code: 2,
-                userInfo: [NSLocalizedDescriptionKey: String(format: String(localized: "设置未生效：%@。请检查 sudoers 配置。"), "\(r1) \(r2)")]
+                userInfo: [NSLocalizedDescriptionKey: String(format: String(localized: "设置未生效：%@。请检查 sudoers 配置。"), output)]
+            ))
+        }
+
+        // 校验（任何"已开启"状态都以系统回读结果为准）
+        let newState = currentState
+        let expected: SleepState = enable ? .on : .off
+        guard newState == expected else {
+            let detail = "设置未生效: 期望=\(expected), 实际=\(newState), pmset输出=\(output)"
+            Logger.error(detail)
+            return .failure(NSError(
+                domain: "MacAwake",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: String(format: String(localized: "设置未生效：%@。请检查 sudoers 配置。"), output)]
             ))
         }
         Logger.info("切换成功: 当前 SleepDisabled = \(newState == .on ? "1" : "0")")
@@ -69,7 +65,7 @@ final class PowerManager {
 
     /// 电池原始输出（pmset -g batt），供"原始模式"显示
     var batteryRaw: String {
-        let output = run("/usr/bin/pmset", args: ["-g", "batt"])
+        let output = run("/usr/bin/pmset", args: ["-g", "batt"]).output
         if let line = output.split(separator: "\n").last(where: { $0.contains("%") }) {
             return line.trimmingCharacters(in: .whitespaces)
         }
@@ -82,53 +78,46 @@ final class PowerManager {
     /// 电池 / 电源信息（自然语言格式）
     var batteryInfo: String {
         let raw = batteryRaw
-        // 正则解析: "-InternalBattery-0 (id=6684771)  28%; discharging; 1:07 remaining present: true"
-        let percentPattern = try! NSRegularExpression(pattern: "(\\d+)%")
-        let timePattern = try! NSRegularExpression(pattern: "(\\d+):(\\d+) remaining")
-        let chargingPattern = try! NSRegularExpression(pattern: "(charging|discharging|charged|finishing charge)")
+        // 例: "-InternalBattery-0 (id=6684771)  28%; discharging; 1:07 remaining present: true"
         let ns = raw as NSString
-
         var parts: [String] = []
 
-        if let pct = percentPattern.firstMatch(in: raw, range: NSRange(location: 0, length: ns.length)) {
+        if let pct = Self.percentPattern.firstMatch(in: raw, range: NSRange(location: 0, length: ns.length)) {
             parts.append(String(format: String(localized: "电量%d%%"), Int(ns.substring(with: pct.range(at: 1)))!))
         }
 
-        if raw.contains("AC Power") || raw.contains("AC attached") {
-            parts.append(String(localized: "外接电源"))
+        switch PowerParsing.chargingState(in: raw) {
+        case "charging":
+            parts.append(String(localized: "充电中"))
+        case "discharging":
+            parts.append(String(localized: "放电中"))
+        case "charged":
+            parts.append(String(localized: "已充满"))
+        case "finishing charge":
+            parts.append(String(localized: "即将充满"))
+        case "not charging":
+            parts.append(String(localized: "未充电"))
+        default:
+            break
         }
 
-        if let m = chargingPattern.firstMatch(in: raw, range: NSRange(location: 0, length: ns.length)) {
-            switch ns.substring(with: m.range(at: 1)) {
-            case "charging":
-                parts.append(String(localized: "充电中"))
-            case "discharging":
-                parts.append(String(localized: "放电中"))
-            case "charged":
-                parts.append(String(localized: "已充满"))
-            case "finishing charge":
-                parts.append(String(localized: "即将充满"))
-            default:
-                break
-            }
-        }
-
-        if let t = timePattern.firstMatch(in: raw, range: NSRange(location: 0, length: ns.length)) {
+        if let t = Self.timePattern.firstMatch(in: raw, range: NSRange(location: 0, length: ns.length)) {
             let hours = Int(ns.substring(with: t.range(at: 1)))!
             let mins = Int(ns.substring(with: t.range(at: 2)))!
             if hours > 0 {
                 parts.append(String(format: String(localized: "剩余约%d小时%d分"), hours, mins))
-            } else {
+            } else if mins > 0 {
                 parts.append(String(format: String(localized: "剩余约%d分钟"), mins))
             }
+            // hours == 0 && mins == 0（如已充满 "0:00 remaining"）时不显示"剩余约0分钟"
         }
 
         return parts.isEmpty ? raw : parts.joined(separator: " ")
     }
 
-    /// 执行外部命令，返回 stdout（不显示终端窗口）
+    /// 执行外部命令，返回 (退出码, stdout)（不显示终端窗口）
     @discardableResult
-    private func run(_ path: String, args: [String]) -> String {
+    private func run(_ path: String, args: [String]) -> (exitCode: Int32, output: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = args
@@ -142,13 +131,15 @@ final class PowerManager {
             try process.run()
         } catch {
             Logger.error("run 启动失败: \(path) \(args) -> \(error)")
-            return ""
+            return (-1, "")
         }
+        // 先读完管道再等退出：若子进程输出超过管道缓冲(64KB)，
+        // 先 waitUntilExit 会双方互相等待而死锁
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         Logger.info("run 完成: \(path) exit=\(process.terminationStatus)")
 
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
         let out = String(data: data, encoding: .utf8) ?? ""
-        return out
+        return (process.terminationStatus, out)
     }
 }
