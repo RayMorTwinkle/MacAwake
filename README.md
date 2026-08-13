@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="Resources/logo.png" alt="MacAwake" width="128">
+
 # 🌙 MacAwake
 
 **MacBook 合盖不休眠菜单栏工具** · Keep your MacBook awake with the lid closed
