@@ -9,7 +9,7 @@
 轻量、开源、单文件的 macOS 菜单栏应用，一键切换「合盖后是否休眠」。
 A lightweight open-source macOS menu bar app that toggles lid-closed sleep with one click.
 
-![Platform](https://img.shields.io/badge/macOS-13%2B-blue) ![License](https://img.shields.io/badge/License-GPL--3.0-green) ![Swift](https://img.shields.io/badge/Swift-6-orange) ![Size](https://img.shields.io/badge/Size-~220KB-brightgreen)
+![Platform](https://img.shields.io/badge/macOS-13%2B-blue) ![License](https://img.shields.io/badge/License-GPL--3.0-green) ![Swift](https://img.shields.io/badge/Swift-6-orange) ![Size](https://img.shields.io/badge/Size-~135KB-brightgreen)
 
 </div>
 
@@ -21,6 +21,10 @@ A lightweight open-source macOS menu bar app that toggles lid-closed sleep with 
   - Menu bar icon reflects current state: filled moon = lid-sleep disabled; outline moon = default
 - 🖱️ **左键**打开菜单查看/操作；**右键**直接切换
   - Left-click opens the menu; right-click toggles immediately
+- ⏱️ **定时恢复休眠**：30 分钟 / 1 小时 / 2 小时 / 4 小时 / 自定义（`90`、`45m`、`1h30m`）/ 不限时；到点恢复休眠并可强制立即睡眠
+  - Auto-restore sleep after 30m / 1h / 2h / 4h / custom / no limit
+- 🛡️ **漂移自愈**：每 ~2 秒核对一次系统值（IOKit 进程内读取，不 fork），被别的程序改回去会自动重新施加，并在菜单里显示被改了几次
+  - Self-healing: re-asserts the setting if another app rewrites it
 - 🔋 **电池状态人性化显示**（点击可在自然语言 / 原始输出间切换）
   - Human-readable battery info (click to toggle raw output)
 - 🚀 **可选开机启动**
@@ -71,6 +75,7 @@ open build/MacAwake.app
 **卸载授权**（恢复"合盖自动休眠"，也删除 sudoers 权限）：
 
 ```bash
+# 先退出 MacAwake，否则运行中的 App 会把 disablesleep 自愈回 1
 # 恢复休眠
 sudo pmset -a disablesleep 0
 
@@ -85,11 +90,20 @@ sudo rm -f /etc/sudoers.d/macawake
 | 操作 | 效果 |
 |---|---|
 | 右键点击菜单栏图标 | 直接切换 合盖不休眠 ⇄ 合盖休眠 |
-| 左键点击菜单栏图标 | 打开菜单，显示状态 + 开关 + 电源信息 |
+| 左键点击菜单栏图标 | 打开菜单，显示状态 + 开关 + 定时 + 电源信息 |
+| 菜单 → 定时恢复休眠 | 选 30 分钟 / 1 小时 / 2 小时 / 4 小时 / 自定义… / 不限时 |
+| 菜单 → 定时恢复休眠 → 延长 30 分钟 | 定时会话未到点时顺延（仅定时会话可见） |
+| 菜单 → 定时恢复休眠 → 到点后强制睡眠 | 到点是「立刻睡」还是「回到系统正常休眠规则」，默认立刻睡 |
 | 菜单 → 电源行 | 点击在「电量 28% 放电中 剩余约1小时」和原始输出间切换 |
 | 菜单 → 开机启动 | 开关开机自启 |
 
 日志（用于排查问题）：`~/Library/Logs/MacAwake/MacAwake.log`
+
+### 行为约定 / Semantics
+
+- **重启后沿用系统当前值**：`pmset` 本来就是跨重启持久的，所以重启后如果系统值仍是 1，App 会继续维护这个会话，并弹一条通知告知。带到期时间的定时若在 App 未运行期间已过期，启动时会直接恢复休眠（不会变成"永远不休眠"）。
+- **退出 App**：定时会话会被释放（定时承诺无法兑现，属于失效安全）；不限时会话保持 —— 这样退出 App 不会莫名其妙改掉你的设置。
+- **App 运行期间，外部把 `disablesleep` 改成 0 会被自动改回 1**。要真正关掉，请用菜单里的「关闭合盖不休眠」，或先退出 App 再执行 `sudo pmset -a disablesleep 0`。
 
 ---
 
@@ -99,23 +113,52 @@ sudo rm -f /etc/sudoers.d/macawake
 - 该设置在**重启后依然生效**（`pmset` 是持久配置）。用完记得关闭，或执行恢复命令。
 - 本 App 仅限 **自用 / 局域网分发**。若要做正式商业分发，需 Apple Developer ID 签名 + 公证。
 
+### 已知冲突：其他电源工具会把设置改回去 / Known conflict
+
+`SleepDisabled` 是**全系统共用**的一项电源配置，任何用 `pmset` 写电源配置的程序都会连带重写它。
+
+本机实测（macOS 15.3.1 / M1 Max）：**AlDente Pro** 每 10 分钟用 `pmset` 重写一次 Energy Saver 配置，把 `SleepDisabled` 清回 0。用户看到的现象就是「开启合盖不休眠后，只有第一次合盖有效，第二次又恢复原状」。
+
+新版 MacAwake 会在 ~2 秒内自动改回 1，并在菜单里显示「⚠️ 已被外部修改 N 次，已自动恢复」。如果你看到这个提示，说明有别的工具在抢这项设置。
+
+想确认是谁干的：
+
+```bash
+# 看最近 10 分钟有哪些进程在跑 pmset（每 10 分钟一次的定时任务最容易认出来）
+log show --last 10m --predicate 'process == "pmset"' --style compact | grep activating
+
+# 看电源配置被重写的时刻
+log show --last 10m --predicate 'eventMessage CONTAINS "Energy Saver Prefs"' --style compact
+```
+
+缓解办法（二选一）：在冲突工具里关掉相关的自动化（例如 AlDente 的 Energy Mode 自动切换 / 「完全禁用睡眠」），或者接受自愈 —— 两者的写入周期不同，MacAwake 的 2 秒轮询会稳定赢，不会来回抖动。
+
 ---
 
 ## 🛠️ 开发 / Development
 
 ```
 MacAwake/
-├── Sources/MacAwake/       # Swift 源码
-│   ├── main.swift          # 入口
-│   ├── AppDelegate.swift   # 菜单栏控制
-│   ├── PowerManager.swift  # 电源状态读写
-│   ├── SudoersManager.swift# sudoers 白名单管理
+├── Sources/MacAwakeCore/     # 纯逻辑（无 IO，可单测）
+│   ├── PowerParsing.swift    # pmset 输出解析
+│   ├── Session.swift         # 会话模型 + 收敛决策引擎 + 重启检测
+│   └── Duration.swift        # 时长解析（90 / 45m / 1h30m）与拆解
+├── Sources/MacAwake/         # 带 IO 的 App 层
+│   ├── main.swift            # 入口
+│   ├── AppDelegate.swift     # 菜单栏 UI
+│   ├── SessionController.swift   # 意图持久化 + 漂移自愈 + 定时器 + 退出失效安全
+│   ├── PowerStateReader.swift    # IOKit 进程内读 SleepDisabled（不 fork）
+│   ├── PowerManager.swift    # pmset 写入 / 回读校验 / sleepnow
+│   ├── Notifier.swift        # 系统通知
+│   ├── SudoersManager.swift  # sudoers 白名单管理
 │   ├── SMAppServiceUtil.swift # 开机启动
-│   ├── Icon.swift          # 菜单栏图标
-│   └── Logger.swift        # 日志
-├── Resources/              # 图标源文件
+│   ├── Icon.swift            # 菜单栏图标
+│   └── Logger.swift          # 日志
+├── Tests/MacAwakeTests/      # 自建断言 harness（CLT 环境无 XCTest）
+├── Resources/                # 图标源文件
 ├── scripts/
 │   ├── build.sh            # 构建 .app（SwiftPM + 组装 + ad-hoc 签名）
+│   ├── run-tests.sh        # 单元测试
 │   ├── make-optimized-icon.sh # SVG → 优化 icns（pngquant 压缩）
 │   └── make-dmg.sh         # 打包 .dmg
 └── Package.swift
@@ -123,9 +166,43 @@ MacAwake/
 
 构建：
 ```bash
-./scripts/build.sh 1.0.0        # 构建 .app
-./scripts/make-dmg.sh 1.0.0     # 打包 .dmg
+./scripts/run-tests.sh          # 单元测试
+./scripts/build.sh 1.2.0        # 构建 .app
+./scripts/make-dmg.sh 1.2.0     # 打包 .dmg
 ```
+
+---
+
+## ❓ 常见问题 / FAQ
+
+**Q：开启后第一次合盖有效，第二次合盖又睡了？**
+A：v1.1.3 及更早版本存在这个 Bug —— 别的程序用 `pmset` 重写电源配置时把 `SleepDisabled` 清回了 0（本机实测是 AlDente Pro，每 10 分钟一次），而旧版把「系统当前值」当成了「用户意图」，被改掉后自己也不知道。v1.2.0 起由 App 持有意图并持续收敛，会自动改回来。详见下面的「已知冲突」。
+
+**Q：菜单显示「已开启」，但 `pmset -g` 读出来是 0？**
+A：正常情况下 App 会在 ~2 秒内改回 1。若长期不是 1，配合菜单里的「⚠️ 已被外部修改 N 次」和日志排查（多半是 sudoers 白名单失效 —— 重新开关一次会重新引导安装）。
+
+**Q：我想手动关掉，为什么 `sudo pmset -a disablesleep 0` 会被改回去？**
+A：App 运行期间这就是设计行为（否则别的程序清掉它也没人管）。请用菜单里的「关闭合盖不休眠」，或先退出 App 再执行命令。
+
+---
+
+## 📝 更新日志 / Changelog
+
+### v1.2.0
+- 🐛 **修复「开启后只有第一次合盖有效，第二次又睡了」**：根因是其他电源工具周期性用 `pmset` 重写 Energy Saver 配置，连带把 `SleepDisabled` 清回 0。新版把「用户意图」与「系统当前值」分离，**每 ~2 秒核对一次，发现漂移立刻重新施加**（IOKit 进程内读取，不 fork；写路径仍是 `pmset` + sudoers 白名单）
+- ✨ 新增**定时恢复休眠**：30 分钟 / 1 小时 / 2 小时 / 4 小时 / 自定义（`90`、`45m`、`1h30m`，1 分钟–24 小时）/ 不限时，支持「延长 30 分钟」，到点恢复休眠并强制立即睡眠（可在子菜单里关掉）
+- ✨ 重启后沿用系统当前值并弹一条通知；退出 App 时定时会话按失效安全释放
+- 📋 菜单显示「⚠️ 已被外部修改 N 次，已自动恢复」，让漂移可见
+- ✅ 61 项单元测试通过；真机验证：注入外部改写后 **~2 秒**自愈
+
+### v1.1.3
+- 插电未充电时显示「外接电源」，与非插电场景的误报兜底
+
+### v1.1.2
+- 不再覆盖用户原有的 `sleep` 设置，等 16 项审查修复
+
+### v1.1.1
+- 首个版本：一键切换合盖休眠 + 电池信息 + 开机启动 + 中英双语
 
 ---
 

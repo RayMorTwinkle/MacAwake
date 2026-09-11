@@ -8,9 +8,10 @@ final class PowerManager {
     private static let percentPattern = try! NSRegularExpression(pattern: "(\\d+)%")
     private static let timePattern = try! NSRegularExpression(pattern: "(\\d+):(\\d+) remaining")
 
-    /// 读取当前 SleepDisabled 状态（pmset -g 普通用户可读）
+    /// 读取当前 SleepDisabled 状态（pmset -g 普通用户可读）。
+    /// 只用于写操作后的回读校验；高频轮询走 `PowerStateReader`（IOKit，不 fork）。
     var currentState: SleepState {
-        PowerParsing.parseSleepDisabled(run("/usr/bin/pmset", args: ["-g"]).output)
+        PowerParsing.parseSleepDisabled(Self.run("/usr/bin/pmset", args: ["-g"]).output)
     }
 
     /// 设置合盖不休眠。enable = true → 禁用合盖休眠；false → 恢复。
@@ -35,7 +36,7 @@ final class PowerManager {
         // 设置值：-a 应用到所有电源场景
         // 通过 sudo -n 免密执行（依赖 /etc/sudoers.d/macawake 白名单）
         let disablesleep = enable ? "1" : "0"
-        let (exitCode, output) = run("/usr/bin/sudo", args: ["-n", "/usr/bin/pmset", "-a", "disablesleep", disablesleep])
+        let (exitCode, output) = Self.run("/usr/bin/sudo", args: ["-n", "/usr/bin/pmset", "-a", "disablesleep", disablesleep])
         Logger.info("pmset 执行结果: disablesleep -> \(output) exit=\(exitCode)")
         if exitCode != 0 {
             let detail = "pmset 退出码 \(exitCode): \(output)"
@@ -63,9 +64,27 @@ final class PowerManager {
         return .success(())
     }
 
+    /// 立刻让系统睡眠（`pmset sleepnow`，需 root，走 sudoers 白名单）。
+    /// 定时到点且用户开启"到点后强制睡眠"时调用：只解除 disablesleep 不会让开盖使用中的
+    /// 机器马上睡（那只是回到正常空闲休眠规则），这一点是有意为之的行为差异。
+    @discardableResult
+    func forceSleepNow() -> Result<Void, Error> {
+        Logger.info("执行 pmset sleepnow（强制立即睡眠）")
+        let (exitCode, output) = Self.run("/usr/bin/sudo", args: ["-n", "/usr/bin/pmset", "sleepnow"])
+        guard exitCode == 0 else {
+            Logger.error("sleepnow 失败: exit=\(exitCode) output=\(output)")
+            return .failure(NSError(
+                domain: "MacAwake",
+                code: 5,
+                userInfo: [NSLocalizedDescriptionKey: String(format: String(localized: "强制睡眠失败：%@"), output)]
+            ))
+        }
+        return .success(())
+    }
+
     /// 电池原始输出（pmset -g batt），供"原始模式"显示
     var batteryRaw: String {
-        let output = run("/usr/bin/pmset", args: ["-g", "batt"]).output
+        let output = Self.run("/usr/bin/pmset", args: ["-g", "batt"]).output
         if let line = output.split(separator: "\n").last(where: { $0.contains("%") }) {
             return line.trimmingCharacters(in: .whitespaces)
         }
@@ -77,7 +96,7 @@ final class PowerManager {
 
     /// 电池 / 电源信息（自然语言格式）
     var batteryInfo: String {
-        let output = run("/usr/bin/pmset", args: ["-g", "batt"]).output
+        let output = Self.run("/usr/bin/pmset", args: ["-g", "batt"]).output
         guard let raw = output.split(separator: "\n").last(where: { $0.contains("%") })?
             .trimmingCharacters(in: .whitespaces) else {
             // 无电池机型（台式机等）：只显示电源来源
@@ -128,9 +147,10 @@ final class PowerManager {
         return parts.isEmpty ? raw : parts.joined(separator: " ")
     }
 
-    /// 执行外部命令，返回 (退出码, stdout)（不显示终端窗口）
+    /// 执行外部命令，返回 (退出码, stdout)（不显示终端窗口）。
+    /// 静态方法：`PowerStateReader` 的 pmset 回退路径也要用。
     @discardableResult
-    private func run(_ path: String, args: [String]) -> (exitCode: Int32, output: String) {
+    static func run(_ path: String, args: [String]) -> (exitCode: Int32, output: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = args
