@@ -69,7 +69,7 @@ Requirements: macOS 13+, Swift toolchain installed (if missing, run `xcode-selec
 Steps:
 1. Clone: git clone https://github.com/RayMorTwinkle/MacAwake.git && cd MacAwake
 2. Run unit tests: ./scripts/run-tests.sh   (expect "全部通过 61/61")
-3. Build and assemble the .app: ./scripts/build.sh 1.2.0
+3. Build and assemble the .app: ./scripts/build.sh 1.2.1
 4. Launch: open build/MacAwake.app
 5. The first time you click "Disable lid sleep" in the menu, macOS asks for an admin
    password once — this installs /etc/sudoers.d/macawake, which permits only `pmset`.
@@ -82,7 +82,7 @@ Steps:
 git clone https://github.com/RayMorTwinkle/MacAwake.git
 cd MacAwake
 ./scripts/run-tests.sh          # optional: unit tests
-./scripts/build.sh 1.2.0        # build + assemble + ad-hoc sign → build/MacAwake.app
+./scripts/build.sh 1.2.1        # build + assemble + ad-hoc sign → build/MacAwake.app
 open build/MacAwake.app
 ```
 
@@ -453,8 +453,8 @@ Mitigation (pick one): disable the relevant automation in the competing tool (e.
 
 ```bash
 ./scripts/run-tests.sh          # unit tests (61 items)
-./scripts/build.sh 1.2.0        # build build/MacAwake.app (ad-hoc signed)
-./scripts/make-dmg.sh 1.2.0     # pack build/MacAwake-1.2.0.dmg
+./scripts/build.sh 1.2.1        # build build/MacAwake.app (ad-hoc signed)
+./scripts/make-dmg.sh 1.2.1     # pack build/MacAwake-1.2.1.dmg
 ./scripts/make-optimized-icon.sh  # regenerate Resources/AppIcon.icns
 ```
 
@@ -465,6 +465,9 @@ Mitigation (pick one): disable the relevant automation in the competing tool (e.
 ---
 
 ## 📝 Changelog
+
+### v1.2.1
+- 🐛 **Fixed "app quits itself after running a while"**: every system notification from v1.2.0 crashed the app ~1s later. The `UNUserNotificationCenter` completion handler runs on a UN background queue, but the closure inherited MainActor isolation, so the runtime executor assertion (`dispatch_assert_queue`) trapped (SIGTRAP). Triggered at login ("reboot adopted"), on timer expiry, or on missed deadline — after that the process stayed dead until next login. Notification delivery now uses async/await throughout, so no closure crosses queues. Verified on-device by replaying the exact crash path (reboot-detected → notify): process alive, no new crash report (the old build crashed 6× in 4 days, see `~/Library/Logs/DiagnosticReports/`).
 
 ### v1.2.0
 - 🐛 **Fixed "only the first lid-close works"**: root cause was other power tools periodically rewriting the Energy Saver config via `pmset`, clobbering `SleepDisabled` back to 0. The new version separates "user intent" from "current system value" and **reconciles every ~2 s, re-asserting on drift** (in-process IOKit read, no fork; the write path is still `pmset` + sudoers whitelist)

@@ -68,7 +68,7 @@ macOS 没有「合盖不休眠」的开关 UI。想边合盖边跑编译 / 下�
 步骤：
 1. 克隆：git clone https://github.com/RayMorTwinkle/MacAwake.git && cd MacAwake
 2. 跑单元测试：./scripts/run-tests.sh   （预期输出 "全部通过 61/61"）
-3. 构建并组装 .app：./scripts/build.sh 1.2.0
+3. 构建并组装 .app：./scripts/build.sh 1.2.1
 4. 启动：open build/MacAwake.app
 5. 首次点击菜单里的「开启合盖不休眠」时，macOS 会弹一次管理员密码框——
    这是安装 /etc/sudoers.d/macawake 白名单，仅放行 pmset 一条命令。
@@ -81,7 +81,7 @@ macOS 没有「合盖不休眠」的开关 UI。想边合盖边跑编译 / 下�
 git clone https://github.com/RayMorTwinkle/MacAwake.git
 cd MacAwake
 ./scripts/run-tests.sh          # 可选：单元测试
-./scripts/build.sh 1.2.0        # 编译 + 组装 + ad-hoc 签名，产物在 build/MacAwake.app
+./scripts/build.sh 1.2.1        # 编译 + 组装 + ad-hoc 签名，产物在 build/MacAwake.app
 open build/MacAwake.app
 ```
 
@@ -452,8 +452,8 @@ log show --last 10m --predicate 'eventMessage CONTAINS "Energy Saver Prefs"' --s
 
 ```bash
 ./scripts/run-tests.sh          # 单元测试（61 项）
-./scripts/build.sh 1.2.0        # 构建 build/MacAwake.app（ad-hoc 签名）
-./scripts/make-dmg.sh 1.2.0     # 打包 build/MacAwake-1.2.0.dmg
+./scripts/build.sh 1.2.1        # 构建 build/MacAwake.app（ad-hoc 签名）
+./scripts/make-dmg.sh 1.2.1     # 打包 build/MacAwake-1.2.1.dmg
 ./scripts/make-optimized-icon.sh  # 重新生成 Resources/AppIcon.icns
 ```
 
@@ -464,6 +464,9 @@ log show --last 10m --predicate 'eventMessage CONTAINS "Energy Saver Prefs"' --s
 ---
 
 ## 📝 更新日志
+
+### v1.2.1
+- 🐛 **修复「运行一段时间后应用自己退出」**：v1.2.0 的系统通知在授权回调处必崩——`UNUserNotificationCenter` 的 completion 在 UN 后台队列执行，但闭包继承了 MainActor 隔离，入口的运行时隔离断言（`dispatch_assert_queue`）直接 SIGTRAP。触发链：开机自启后「检测到重启」/ 定时到点 / 定时过期任一通知发出后 ~1 秒崩溃，进程保持死亡直到下次登录。已改为全程 async/await，回调不再跨队列；真机按旧版必崩路径（检测到重启 → 通知）回归验证：进程存活、无新崩溃报告（旧版 4 天内崩溃 ×6，见 `~/Library/Logs/DiagnosticReports/`）
 
 ### v1.2.0
 - 🐛 **修复「开启后只有第一次合盖有效，第二次又睡了」**：根因是其它电源工具周期性用 `pmset` 重写 Energy Saver 配置，连带把 `SleepDisabled` 清回 0。新版把「用户意图」与「系统当前值」分离，**每 ~2 秒核对一次，发现漂移立刻重新施加**（IOKit 进程内读取，不 fork；写路径仍是 `pmset` + sudoers 白名单）
