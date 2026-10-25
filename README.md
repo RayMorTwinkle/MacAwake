@@ -96,6 +96,27 @@ xattr -dr com.apple.quarantine /Applications/MacAwake.app && open /Applications/
 
 ---
 
+## 🧩 v2.0 新能力
+
+主窗口（菜单栏图标 → 打开主窗口…）四个标签页：
+
+| 标签页 | 能力 |
+|---|---|
+| 合盖不休眠 | 原菜单功能 GUI 化：大开关、定时预设/自定义、强制睡眠、电源状态、漂移计数 |
+| 能效调度 | [EfficiencyTool](https://github.com/Mmohet/EfficiencyTool) 功能原生移植：按关键词把进程钉到能效核（`taskpolicy`），自适应扫描间隔、电池门控、平衡模式（CPU 飙高自动放回性能核、降回再钉小核，带滞回） |
+| 自动化 | 拼图块式规则：1 个触发块（合盖/开盖/插拔电/电量越线）+ 顺序堆叠的动作块（亮度、CPU 前 N 钉小核、解除钉核、强制睡眠、开关合盖不休眠、通知）。预置「合盖省电模式」「合盖低电量强制睡眠」「开盖恢复」 |
+| 统计 | 合盖事件流水（时长/掉电/平均功率）、平均掉电速度、平均放电功率、合盖→入睡耗时、每日运行与合盖累计 |
+
+自动化与统计在后台常驻；能效调度手动启停，停止/正常退出时自动解除全部钉核（异常被杀则钉核随目标进程退出自然失效）。
+
+```bash
+# dev 构建（与正式版共存：独立 bundle id、独立数据目录、pmset 全部干跑）
+MACAWAKE_DEV=1 ./scripts/build.sh 2.0.0
+open build/MacAwakeDev.app --args --show-window --efficiency-on   # QA 参数
+```
+
+---
+
 ## 🖥️ 使用
 
 | 操作 | 效果 |
@@ -464,6 +485,15 @@ log show --last 10m --predicate 'eventMessage CONTAINS "Energy Saver Prefs"' --s
 ---
 
 ## 📝 更新日志
+
+### v2.0.0
+- ✨ **GUI 主窗口**：四个标签页（合盖不休眠 / 能效调度 / 自动化 / 统计），菜单栏保留快速操作
+- ✨ **能效调度（EfficiencyTool 移植，原生重写）**：无 bash 子进程。sysctl `KERN_PROCARGS2` 枚举进程（`proc_pidpath` 在本机全线 EOVERFLOW，弃用）、`proc_pid_rusage` 增量算 CPU%、`taskpolicy` 钉小核/大核；自适应扫描间隔（命中减半至 5s，空转 +5s 至 120s）；平衡模式带系统 CPU 门槛 + 70% 滞回
+- ✨ **自动化**：拼图块规则编辑器（触发块 + 可排序动作块），预置合盖省电（最低亮度 + CPU 前 5 钉小核、开盖自动解除）、合盖电量 <30% 强制睡眠、开盖恢复；电量触发为越线语义不重复刷
+- ✨ **统计**：合盖→入睡/开盖完整事件（掉电、平均放电功率），7/30 天聚合，每日运行/合盖累计，JSON 落盘
+- 🐛 修复 v1.2.1 通知崩溃之后新引入路径上的两处真机崩溃：`IOPSCopyPowerSourcesList` CFArray 桥接过度释放；`proc_pid_rusage` 二级指针写法被内核 copyout 打穿栈帧（XNU 把参数值直接当写入目标）
+- ⚠️ 已知边界：`taskpolicy` 在 `/usr/sbin/`（非 `/usr/bin/`）；钉核在异常被杀时不会自动恢复（与 EfficiencyTool 一致）；亮度控制依赖私有 DisplayServices 符号，不可用时动作降级为日志
+- ✅ 单元测试 98 项（新增 37 项：扫描间隔/规则匹配/平衡决策/触发求值/统计聚合）；真机验证：钉小核后单线程吞吐 5.9M/s → 1.1M/s（E-core 5.4×），`-B` 恢复后回升；dev 构建与正式版共存无干扰
 
 ### v1.2.1
 - 🐛 **修复「运行一段时间后应用自己退出」**：v1.2.0 的系统通知在授权回调处必崩——`UNUserNotificationCenter` 的 completion 在 UN 后台队列执行，但闭包继承了 MainActor 隔离，入口的运行时隔离断言（`dispatch_assert_queue`）直接 SIGTRAP。触发链：开机自启后「检测到重启」/ 定时到点 / 定时过期任一通知发出后 ~1 秒崩溃，进程保持死亡直到下次登录。已改为全程 async/await，回调不再跨队列；真机按旧版必崩路径（检测到重启 → 通知）回归验证：进程存活、无新崩溃报告（旧版 4 天内崩溃 ×6，见 `~/Library/Logs/DiagnosticReports/`）

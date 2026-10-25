@@ -466,6 +466,15 @@ Mitigation (pick one): disable the relevant automation in the competing tool (e.
 
 ## 📝 Changelog
 
+### v2.0.0
+- ✨ **Main window GUI**: four tabs (Keep Awake / Efficiency / Automation / Stats); menu bar quick actions preserved
+- ✨ **Efficiency scheduling (native rewrite of EfficiencyTool)**: no bash subprocesses. Process discovery via sysctl `KERN_PROCARGS2` (`proc_pidpath` returns EOVERFLOW for every process on this machine), CPU% via `proc_pid_rusage` deltas, pinning via `taskpolicy`; adaptive scan interval; balance mode with system-CPU gate and 70% hysteresis
+- ✨ **Automation**: puzzle-block rule editor (trigger block + reorderable action blocks), presets for lid-closed power saving (min brightness + top-5 CPU pinned to E-cores, auto-release on lid open), force sleep below 30% while lid closed, lid-open restore; battery triggers are edge-triggered
+- ✨ **Stats**: full lid episodes (drain %, average discharge watts), 7/30-day aggregates, daily uptime & lid-closed totals, JSON persisted
+- 🐛 Fixed two crashes found on-device after v1.2.1: CFArray bridging over-release in `IOPSCopyPowerSourcesList`; `proc_pid_rusage` double-pointer pattern smashing the stack (XNU copyouts to the parameter value itself)
+- ⚠️ Known edges: `taskpolicy` lives in `/usr/sbin/`; pins are not restored if the app is killed abnormally; brightness action degrades to a log line when DisplayServices symbols are unavailable
+- ✅ 98 unit tests (37 new); on-device verified: E-core pin drops single-thread throughput 5.9M/s → 1.1M/s (5.4×), recovers with `-B`
+
 ### v1.2.1
 - 🐛 **Fixed "app quits itself after running a while"**: every system notification from v1.2.0 crashed the app ~1s later. The `UNUserNotificationCenter` completion handler runs on a UN background queue, but the closure inherited MainActor isolation, so the runtime executor assertion (`dispatch_assert_queue`) trapped (SIGTRAP). Triggered at login ("reboot adopted"), on timer expiry, or on missed deadline — after that the process stayed dead until next login. Notification delivery now uses async/await throughout, so no closure crosses queues. Verified on-device by replaying the exact crash path (reboot-detected → notify): process alive, no new crash report (the old build crashed 6× in 4 days, see `~/Library/Logs/DiagnosticReports/`).
 

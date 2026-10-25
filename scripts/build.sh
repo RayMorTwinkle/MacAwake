@@ -11,6 +11,13 @@ BUILD_DIR="$ROOT/build"
 APP="$BUILD_DIR/MacAwake.app"
 BUNDLE_ID="com.macawake.MacAwake"
 
+# dev 变体：MACAWAKE_DEV=1 → 独立 bundle id / 独立 defaults 与数据目录，
+# pmset 写操作干跑（见 PowerManager.isDevBuild），可与正式版共存联调。
+if [ "${MACAWAKE_DEV:-0}" = "1" ]; then
+    APP="$BUILD_DIR/MacAwakeDev.app"
+    BUNDLE_ID="com.macawake.MacAwake.dev"
+fi
+
 echo "==> swift build -c release"
 swift build -c release
 

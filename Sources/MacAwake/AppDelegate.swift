@@ -10,6 +10,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     private let powerManager = PowerManager()
     private let controller = SessionController()
 
+    // v2.0：GUI + 能效调度 + 自动化 + 统计
+    private let scanner = ProcessScanner()
+    private lazy var taskPolicy = TaskPolicyService()
+    private lazy var efficiencyEngine = EfficiencyEngine(scanner: scanner, taskPolicy: taskPolicy)
+    private lazy var automationEngine = AutomationEngine(scanner: scanner,
+                                                         taskPolicy: taskPolicy,
+                                                         power: powerManager,
+                                                         controller: controller)
+    private let statsRecorder = StatsRecorder()
+    private lazy var appModel = AppModel(controller: controller,
+                                         efficiency: efficiencyEngine,
+                                         automation: automationEngine,
+                                         stats: statsRecorder)
+    private let mainWindowController = MainWindowController()
+
     /// 菜单展开时缓存电池文案：重建菜单不能每次都 fork `pmset -g batt`
     private var cachedBatteryText = ""
 
@@ -32,18 +47,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        Logger.info("MacAwake 启动")
+        Logger.info("MacAwake 启动\(PowerManager.isDevBuild ? "（DEV 构建，pmset 干跑）" : "")")
         setupStatusItem()
 
         controller.onSnapshotChange = { [weak self] in self?.updateIcon() }
         controller.onEvent = { [weak self] event in self?.handle(event) }
         controller.start()
+
+        statsRecorder.start()
+        automationEngine.start()
+        appModel.startHeartbeat()
+
+        // QA 便捷参数（dev 联调/自动化验证用）
+        let args = Set(CommandLine.arguments)
+        if args.contains("--show-window") { showMainWindow() }
+        if args.contains("--efficiency-on") { efficiencyEngine.start() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        efficiencyEngine.stop()      // 恢复所有被钉进程
+        automationEngine.stop()
+        statsRecorder.stop()
+        appModel.stopHeartbeat()
         controller.releaseOnQuit()
         controller.stop()
         Logger.info("MacAwake 退出")
+    }
+
+    func showMainWindow() {
+        mainWindowController.show(model: appModel)
     }
 
     private func setupStatusItem() {
@@ -191,6 +223,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         }
     }
 
+    @objc private func openMainWindow() {
+        showMainWindow()
+    }
+
     @objc private func quitApp() {
         NSApp.terminate(nil)
     }
@@ -218,6 +254,16 @@ extension AppDelegate: NSMenuDelegate {
 
     private func rebuildMenu() {
         statusMenu.removeAllItems()
+
+        // 0. 主窗口（GUI 入口）
+        let windowItem = NSMenuItem(
+            title: String(localized: "打开主窗口…"),
+            action: #selector(openMainWindow), keyEquivalent: ""
+        )
+        windowItem.target = self
+        statusMenu.addItem(windowItem)
+
+        statusMenu.addItem(.separator())
 
         // 1. 状态
         let stateTitle: String

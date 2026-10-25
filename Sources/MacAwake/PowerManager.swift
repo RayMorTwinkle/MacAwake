@@ -5,6 +5,10 @@ import MacAwakeCore
 /// 底层使用公开的 pmset 命令；修改需要 root（通过 sudoers 白名单免密）。
 final class PowerManager {
 
+    /// dev 构建（bundle id 以 .dev 结尾）所有 pmset 写操作干跑：
+    /// 与正式版 MacAwake 共存测试时，绝不能动正式版持有的 SleepDisabled 会话。
+    static let isDevBuild = Bundle.main.bundleIdentifier?.hasSuffix(".dev") == true
+
     private static let percentPattern = try! NSRegularExpression(pattern: "(\\d+)%")
     private static let timePattern = try! NSRegularExpression(pattern: "(\\d+):(\\d+) remaining")
 
@@ -19,6 +23,10 @@ final class PowerManager {
     /// 只操作 disablesleep 一项：它已阻止全部睡眠（含合盖），
     /// 不动用户的 sleep（系统睡眠定时）设置，避免覆盖用户原有配置。
     func setSleepDisabled(_ enable: Bool) -> Result<Void, Error> {
+        if Self.isDevBuild {
+            Logger.info("DEV 构建：干跑 setSleepDisabled(\(enable))，不执行 pmset（与正式版共存）")
+            return .success(())
+        }
         Logger.info("请求切换: \(enable ? "开启合盖不休眠" : "恢复合盖休眠")")
 
         // 先确保 sudoers 白名单已安装
@@ -69,6 +77,10 @@ final class PowerManager {
     /// 机器马上睡（那只是回到正常空闲休眠规则），这一点是有意为之的行为差异。
     @discardableResult
     func forceSleepNow() -> Result<Void, Error> {
+        if Self.isDevBuild {
+            Logger.info("DEV 构建：干跑 forceSleepNow，不执行 pmset sleepnow")
+            return .success(())
+        }
         Logger.info("执行 pmset sleepnow（强制立即睡眠）")
         let (exitCode, output) = Self.run("/usr/bin/sudo", args: ["-n", "/usr/bin/pmset", "sleepnow"])
         guard exitCode == 0 else {

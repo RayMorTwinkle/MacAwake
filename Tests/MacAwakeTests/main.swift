@@ -144,6 +144,120 @@ check("剩余不足 1 分钟也显示 1 分钟", DurationFormat.decomposeRemaini
 check("剩余 3600 秒 = 1 小时 0 分", DurationFormat.decomposeRemaining(3600) == (1, 0))
 check("剩余 5400 秒 = 1 小时 30 分", DurationFormat.decomposeRemaining(5400) == (1, 30))
 
+// MARK: ScanPlanner 自适应间隔
+
+check("空转 +5s", ScanPlanner.nextInterval(current: 20, newPins: 0) == 25)
+check("空转封顶 120s", ScanPlanner.nextInterval(current: 118, newPins: 0) == 120)
+check("命中减半", ScanPlanner.nextInterval(current: 20, newPins: 3) == 10)
+check("命中下限 5s", ScanPlanner.nextInterval(current: 8, newPins: 1) == 5)
+check("初始间隔 15s", ScanPlanner.initialInterval == 15)
+
+// MARK: CoreRules 匹配
+
+let rules = CoreRules(customPatterns: ["RayBlog"], useDefaultRules: true)
+check("默认规则命中 Renderer", rules.matches("/Applications/Chromium.app/Contents/Frameworks/Renderer") == true)
+check("自定义关键词命中", rules.matches("/Users/ray/dev/RayBlog/worker") == true)
+check("不相关路径不命中", rules.matches("/System/Library/CoreServices/Finder") == false)
+check("大小写不敏感", rules.matches("/opt/bilibili-helper") == true)
+let noDefault = CoreRules(customPatterns: ["RayBlog"], useDefaultRules: false)
+check("关默认规则后只剩自定义", noDefault.matches("Renderer") == false && noDefault.matches("RayBlog") == true)
+let emptyRules = CoreRules(customPatterns: [], useDefaultRules: false)
+check("无规则不匹配任何", emptyRules.matches("anything") == false)
+
+// MARK: BalancePlanner 平衡决策
+
+check("小核进程 CPU 超阈值 → 大核",
+      BalancePlanner.decide(cpuPercent: 150, isOnEfficiency: true,
+                            threshold: 100, systemGatePercent: 20, systemCpuPercent: 50) == .toPerformance)
+check("小核进程 CPU 不高 → 保持",
+      BalancePlanner.decide(cpuPercent: 30, isOnEfficiency: true,
+                            threshold: 100, systemGatePercent: 20, systemCpuPercent: 50) == .keep)
+check("系统整体不忙 → 不动",
+      BalancePlanner.decide(cpuPercent: 150, isOnEfficiency: true,
+                            threshold: 100, systemGatePercent: 20, systemCpuPercent: 10) == .keep)
+check("大核进程 CPU 降回阈值 70% 以下 → 钉回小核",
+      BalancePlanner.decide(cpuPercent: 60, isOnEfficiency: false,
+                            threshold: 100, systemGatePercent: 20, systemCpuPercent: 50) == .toEfficiency)
+check("大核进程 CPU 在滞回区内 → 保持",
+      BalancePlanner.decide(cpuPercent: 85, isOnEfficiency: false,
+                            threshold: 100, systemGatePercent: 20, systemCpuPercent: 50) == .keep)
+
+// MARK: AutomationEvaluator 触发
+
+func ctx(_ e: AutomationContext.Event, lid: Bool = false, prev: Int? = nil, now: Int = 100) -> AutomationContext {
+    AutomationContext(event: e, isLidClosed: lid, previousBatteryPercent: prev, currentBatteryPercent: now)
+}
+
+check("合盖事件命中 lidClosed",
+      AutomationEvaluator.fires(.lidClosed, context: ctx(.lidChanged(closed: true))))
+check("开盖事件不命中 lidClosed",
+      !AutomationEvaluator.fires(.lidClosed, context: ctx(.lidChanged(closed: false))))
+check("开盖事件命中 lidOpened",
+      AutomationEvaluator.fires(.lidOpened, context: ctx(.lidChanged(closed: false))))
+check("插电命中 pluggedIn",
+      AutomationEvaluator.fires(.pluggedIn, context: ctx(.powerSourceChanged(onAC: true))))
+check("拔电不命中 pluggedIn",
+      !AutomationEvaluator.fires(.pluggedIn, context: ctx(.powerSourceChanged(onAC: false))))
+check("电量 40→29 跌破 30 命中",
+      AutomationEvaluator.fires(.batteryBelow(pct: 30, whileLidClosed: false),
+                                context: ctx(.batteryTick, prev: 40, now: 29)))
+check("电量 25→20 已在线下不重复触发",
+      !AutomationEvaluator.fires(.batteryBelow(pct: 30, whileLidClosed: false),
+                                 context: ctx(.batteryTick, prev: 25, now: 20)))
+check("电量越线但盖子开着不触发（要求合盖）",
+      !AutomationEvaluator.fires(.batteryBelow(pct: 30, whileLidClosed: true),
+                                 context: ctx(.batteryTick, lid: false, prev: 40, now: 29)))
+check("电量越线且合盖 → 触发",
+      AutomationEvaluator.fires(.batteryBelow(pct: 30, whileLidClosed: true),
+                                context: ctx(.batteryTick, lid: true, prev: 40, now: 29)))
+check("电量 20→31 升破 30 命中 batteryAbove",
+      AutomationEvaluator.fires(.batteryAbove(pct: 30, whileLidClosed: false),
+                                context: ctx(.batteryTick, prev: 20, now: 31)))
+
+let sampleRules = [
+    AutomationRule(name: "禁用", enabled: false, trigger: .lidClosed, actions: [.forceSleep]),
+    AutomationRule(name: "启用", enabled: true, trigger: .lidClosed, actions: [.unpinAll]),
+    AutomationRule(name: "不相关", enabled: true, trigger: .lidOpened, actions: []),
+]
+check("matchingRules 只返回启用且命中的",
+      AutomationEvaluator.matchingRules(sampleRules, context: ctx(.lidChanged(closed: true))).map(\.name) == ["启用"])
+
+check("预置规则可解码往返",
+      {
+          let data = try! JSONEncoder().encode(AutomationPresets.all)
+          let back = try! JSONDecoder().decode([AutomationRule].self, from: data)
+          return back == AutomationPresets.all
+      }())
+
+// MARK: LidEpisode / StatsMath 统计
+
+let base = Date(timeIntervalSince1970: 1_700_000_000)
+let e1 = LidEpisode(closedAt: base,
+                    endedAt: base.addingTimeInterval(3600),
+                    endKind: .slept,
+                    batteryAtClose: 80, batteryAtEnd: 70,
+                    averageWatts: 8)
+// 1 小时掉 10% → 10 %/h
+let e2 = LidEpisode(closedAt: base.addingTimeInterval(7200),
+                    endedAt: base.addingTimeInterval(7200 + 1800),
+                    endKind: .slept,
+                    batteryAtClose: 65, batteryAtEnd: 60,
+                    averageWatts: 10)
+// 0.5 小时掉 5% → 10 %/h
+let summary = StatsMath.summarize([e1, e2])
+check("合盖总时长 = 1.5h", summary.totalLidSeconds == 5400)
+check("睡着合盖时长 = 1.5h", summary.sleptLidSeconds == 5400)
+check("平均掉电速度 = 10 %/h", abs(summary.avgDrainPerHour! - 10) < 0.001)
+check("平均功率 = 9W", abs(summary.avgWatts! - 9) < 0.001)
+check("平均合盖→入睡 = 45 分钟", summary.avgCloseToSleepSeconds == 2700)
+
+let openEpisode = LidEpisode(closedAt: base, batteryAtClose: nil)
+check("未结束事件用当前时间算时长", openEpisode.duration(now: base.addingTimeInterval(120)) == 120)
+check("无电量读数不出掉电速度", openEpisode.drainPerHour(now: base.addingTimeInterval(120)) == nil)
+check("事件数含未结束", StatsMath.summarize([openEpisode]).episodeCount == 1)
+
+check("StatsStore 日 key 格式", StatsStore.dayKey(for: base).count == 10)
+
 print("")
 if failed == 0 {
     print("全部通过 \(total)/\(total)")
