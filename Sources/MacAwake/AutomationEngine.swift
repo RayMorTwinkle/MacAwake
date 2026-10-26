@@ -89,7 +89,7 @@ final class AutomationEngine: ObservableObject {
     /// 手动触发一条规则（测试/演示用：不走触发器判断）
     func runManually(_ rule: AutomationRule) {
         log("手动触发「\(rule.name)」")
-        execute(rule.actions, ruleName: rule.name)
+        execute(rule.actions, ruleName: rule.name, ruleID: rule.id)
     }
 
     // MARK: - 事件轮询
@@ -120,7 +120,7 @@ final class AutomationEngine: ObservableObject {
                                             currentBatteryPercent: snapshot.capacityPercent ?? lastBatteryPercent ?? 100)
             for rule in AutomationEvaluator.matchingRules(rules, context: context) {
                 log("触发「\(rule.name)」← \(describe(event))")
-                execute(rule.actions, ruleName: rule.name)
+                execute(rule.actions, ruleName: rule.name, ruleID: rule.id)
             }
         }
 
@@ -135,53 +135,112 @@ final class AutomationEngine: ObservableObject {
         }
     }
 
-    // MARK: - 动作执行
+    // MARK: - 动作执行（Task 内顺序异步：等待模块不卡界面）
 
-    private func execute(_ actions: [AutomationAction], ruleName: String) {
-        for action in actions {
-            switch action {
-            case .setBrightness(let level):
-                if BrightnessService.set(level) {
-                    log("「\(ruleName)」亮度 → \(Int(level * 100))%")
-                } else {
-                    log("「\(ruleName)」亮度设置不可用")
+    /// 正在执行中的规则（防同一规则并发重入）
+    private var runningRules: Set<UUID> = []
+
+    private func execute(_ actions: [AutomationAction], ruleName: String, ruleID: UUID? = nil) {
+        Task { @MainActor in
+            if let ruleID {
+                guard !runningRules.contains(ruleID) else {
+                    log("「\(ruleName)」已在执行中，跳过本次触发")
+                    return
                 }
+                runningRules.insert(ruleID)
+            }
+            defer { if let ruleID { runningRules.remove(ruleID) } }
 
-            case .pinTopCPU(let n, let sticky):
-                let top = scanner.topCPU(n)
-                for proc in top where taskPolicy.tracked[proc.pid] == nil {
-                    if taskPolicy.set(pid: proc.pid, to: .efficiency, cpuPercent: proc.cpuPercent),
-                       sticky {
-                        stickyPIDs.insert(proc.pid)
-                    }
-                }
-                log("「\(ruleName)」CPU 前 \(n) 已钉小核：\(top.map { "\($0.name)(\(Int($0.cpuPercent))%)" }.joined(separator: "、"))")
-
-            case .unpinAll:
-                taskPolicy.restoreAll()
-                stickyPIDs.removeAll()
-                log("「\(ruleName)」已解除全部钉核")
-
-            case .forceSleep:
-                log("「\(ruleName)」强制睡眠")
-                Notifier.post(title: "MacAwake 自动化", body: "规则「\(ruleName)」触发强制睡眠")
-                if case .failure(let error) = power.forceSleepNow() {
-                    log("强制睡眠失败: \(error.localizedDescription)")
-                }
-
-            case .keepAwakeOn(let seconds):
-                log("「\(ruleName)」开启合盖不休眠\(seconds.map { " \($0 / 60) 分钟" } ?? "（不限时）")")
-                controller.turnOn(duration: seconds.map { Double($0) })
-
-            case .keepAwakeOff:
-                log("「\(ruleName)」关闭合盖不休眠")
-                controller.turnOff()
-
-            case .notify(let message):
-                Notifier.post(title: "MacAwake 自动化", body: message)
-                log("「\(ruleName)」通知：\(message)")
+            for action in actions {
+                await executeOne(action, ruleName: ruleName)
             }
         }
+    }
+
+    private func executeOne(_ action: AutomationAction, ruleName: String) async {
+        switch action {
+
+        case .setBrightness(let level):
+            if BrightnessService.set(level) {
+                log("「\(ruleName)」亮度 → \(Int(level * 100))%")
+            } else {
+                log("「\(ruleName)」亮度设置不可用（DisplayServices 缺失）")
+            }
+
+        case .pinTopCPU(let n, let sticky):
+            let procs = scanner.snapshot()
+            let top = scanner.topCPU(n, from: procs)
+            for proc in top where taskPolicy.tracked[proc.pid] == nil {
+                if taskPolicy.set(pid: proc.pid, to: .efficiency, cpuPercent: proc.cpuPercent),
+                   sticky {
+                    stickyPIDs.insert(proc.pid)
+                }
+            }
+            log("「\(ruleName)」CPU 前 \(n) 已钉小核：\(top.map { "\($0.name)(\(Int($0.cpuPercent))%)" }.joined(separator: "、"))")
+
+        case .pinKeyword(let keyword):
+            let procs = scanner.snapshot()
+            let pids = scanner.pids(matchingKeyword: keyword, in: procs)
+            var ok = 0
+            for pid in pids where taskPolicy.set(pid: pid, to: .efficiency) { ok += 1 }
+            log("「\(ruleName)」关键词「\(keyword)」匹配 \(pids.count) 个进程，成功钉住 \(ok) 个")
+
+        case .pinApp(let appName):
+            let pids = scanner.pids(ofApp: appName)
+            var ok = 0
+            for pid in pids where taskPolicy.set(pid: pid, to: .efficiency) { ok += 1 }
+            log("「\(ruleName)」应用「\(appName)」共 \(pids.count) 个进程，成功钉住 \(ok) 个")
+
+        case .unpinAll:
+            taskPolicy.restoreAll()
+            stickyPIDs.removeAll()
+            log("「\(ruleName)」已解除全部钉核")
+
+        case .displaySleep:
+            log("「\(ruleName)」熄屏")
+            PowerManager.displaySleepNow()
+
+        case .forceSleep:
+            log("「\(ruleName)」强制睡眠")
+            Notifier.post(title: "MacAwake 自动化", body: "规则「\(ruleName)」触发强制睡眠")
+            if case .failure(let error) = power.forceSleepNow() {
+                log("强制睡眠失败: \(error.localizedDescription)")
+            }
+
+        case .quitApp(let appName):
+            let apps = NSWorkspace.shared.runningApplications.filter {
+                $0.localizedName == appName && $0.bundleIdentifier != Bundle.main.bundleIdentifier
+            }
+            if apps.isEmpty {
+                log("「\(ruleName)」退出应用：「\(appName)」未在运行")
+            } else {
+                for app in apps { _ = app.terminate() }
+                log("「\(ruleName)」已请求退出「\(appName)」（\(apps.count) 个进程）")
+            }
+
+        case .wait(let minutes):
+            log("「\(ruleName)」等待 \(formatWait(minutes)) 后继续…")
+            let nanos = UInt64(max(0, minutes) * 60 * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: nanos)
+
+        case .keepAwakeOn(let seconds):
+            log("「\(ruleName)」开启合盖不休眠\(seconds.map { " \($0 / 60) 分钟" } ?? "（不限时）")")
+            controller.turnOn(duration: seconds.map { Double($0) })
+
+        case .keepAwakeOff:
+            log("「\(ruleName)」关闭合盖不休眠")
+            controller.turnOff()
+
+        case .notify(let message):
+            Notifier.post(title: "MacAwake 自动化", body: message)
+            log("「\(ruleName)」通知：\(message)")
+        }
+    }
+
+    private func formatWait(_ minutes: Double) -> String {
+        if minutes >= 1 { return minutes.truncatingRemainder(dividingBy: 1) == 0
+            ? "\(Int(minutes)) 分钟" : String(format: "%.1f 分钟", minutes) }
+        return "\(Int(minutes * 60)) 秒"
     }
 
     // MARK: - sticky 钉核生命周期

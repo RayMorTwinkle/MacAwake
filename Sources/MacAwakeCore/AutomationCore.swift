@@ -23,16 +23,27 @@ public enum AutomationTrigger: Codable, Equatable, Sendable {
 }
 
 /// 动作块：一条规则 = 1 个触发器 + 顺序执行的 N 个动作。
+/// 动作在 Task 里顺序异步执行（等待模块不卡界面）。
 public enum AutomationAction: Codable, Equatable, Sendable {
 
     /// 屏幕亮度调到 0–1（0 = 最低亮度，预置"合盖省电"用 0）
     case setBrightness(level: Double)
     /// 把当前 CPU 占用前 N 的进程钉到小核；stickyUntilLidOpen = 开盖时自动解除
     case pinTopCPU(n: Int, stickyUntilLidOpen: Bool)
+    /// 把命令行/名称匹配关键词的进程（当前快照）钉到小核
+    case pinKeyword(keyword: String)
+    /// 把指定应用（主进程 + 同 bundle 全部子进程）钉到小核
+    case pinApp(appName: String)
     /// 解除本应用钉过的所有进程（回到默认调度）
     case unpinAll
+    /// 立即熄屏（显示器休眠，免 root；动一下鼠标/键盘即亮）
+    case displaySleep
     /// 立即强制睡眠（pmset sleepnow）
     case forceSleep
+    /// 优雅退出指定应用（按应用名）
+    case quitApp(appName: String)
+    /// 等待 N 分钟再执行后续动作
+    case wait(minutes: Double)
     /// 开启合盖不休眠（秒数，nil = 不限时）
     case keepAwakeOn(seconds: Int?)
     /// 关闭合盖不休眠

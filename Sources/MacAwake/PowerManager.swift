@@ -72,6 +72,13 @@ final class PowerManager {
         return .success(())
     }
 
+    /// 立即熄屏（显示器休眠）。`pmset displaysleepnow` 免 root、轻量可逆，
+    /// 合盖自动化场景常用；DEV 构建同样真实执行（不属于需要干跑的电源会话操作）。
+    static func displaySleepNow() {
+        Logger.info("执行 pmset displaysleepnow（熄屏）")
+        run("/usr/bin/pmset", args: ["displaysleepnow"])
+    }
+
     /// 立刻让系统睡眠（`pmset sleepnow`，需 root，走 sudoers 白名单）。
     /// 定时到点且用户开启"到点后强制睡眠"时调用：只解除 disablesleep 不会让开盖使用中的
     /// 机器马上睡（那只是回到正常空闲休眠规则），这一点是有意为之的行为差异。

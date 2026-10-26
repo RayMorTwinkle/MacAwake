@@ -74,11 +74,15 @@ final class EfficiencyEngine: ObservableObject {
     }
 
     var rules: CoreRules {
-        let patterns = customPatternsText
+        CoreRules(customPatterns: customPatternsLines, useDefaultRules: useDefaultRules)
+    }
+
+    /// 自定义关键词按行解析（AppPickerStore「加入监控」也走这里）
+    var customPatternsLines: [String] {
+        customPatternsText
             .split(separator: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        return CoreRules(customPatterns: patterns, useDefaultRules: useDefaultRules)
     }
 
     var trackedList: [TaskPolicyService.Tracked] { taskPolicy.trackedList }

@@ -19,10 +19,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
                                                          power: powerManager,
                                                          controller: controller)
     private let statsRecorder = StatsRecorder()
+    private lazy var appPicker = AppPickerStore(scanner: scanner,
+                                                taskPolicy: taskPolicy,
+                                                engine: efficiencyEngine)
     private lazy var appModel = AppModel(controller: controller,
                                          efficiency: efficiencyEngine,
                                          automation: automationEngine,
-                                         stats: statsRecorder)
+                                         stats: statsRecorder,
+                                         appPicker: appPicker)
     private let mainWindowController = MainWindowController()
 
     /// 菜单展开时缓存电池文案：重建菜单不能每次都 fork `pmset -g batt`

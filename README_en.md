@@ -469,7 +469,8 @@ Mitigation (pick one): disable the relevant automation in the competing tool (e.
 ### v2.0.0
 - ✨ **Main window GUI**: four tabs (Keep Awake / Efficiency / Automation / Stats); menu bar quick actions preserved
 - ✨ **Efficiency scheduling (native rewrite of EfficiencyTool)**: no bash subprocesses. Process discovery via sysctl `KERN_PROCARGS2` (`proc_pidpath` returns EOVERFLOW for every process on this machine), CPU% via `proc_pid_rusage` deltas, pinning via `taskpolicy`; adaptive scan interval; balance mode with system-CPU gate and 70% hysteresis
-- ✨ **Automation**: puzzle-block rule editor (trigger block + reorderable action blocks), presets for lid-closed power saving (min brightness + top-5 CPU pinned to E-cores, auto-release on lid open), force sleep below 30% while lid closed, lid-open restore; battery triggers are edge-triggered
+- ✨ **Automation**: puzzle-block rule editor (trigger + reorderable action blocks, actions run sequentially & async so "wait" blocks work), 12 action types incl. brightness, display sleep, top-N CPU pin, pin-by-keyword, pin-app (all subprocesses), unpin, wait, force sleep, quit app, keep-awake on/off, notify; battery triggers are edge-triggered
+- ✨ **App picker + Easy/Pro mode** (ported from EfficiencyTool feat/easy-mode-process-picker): running-apps card (icon, live CPU, proc count) with one-click group pin/restore/add-to-watch per app
 - ✨ **Stats**: full lid episodes (drain %, average discharge watts), 7/30-day aggregates, daily uptime & lid-closed totals, JSON persisted
 - 🐛 Fixed two crashes found on-device after v1.2.1: CFArray bridging over-release in `IOPSCopyPowerSourcesList`; `proc_pid_rusage` double-pointer pattern smashing the stack (XNU copyouts to the parameter value itself)
 - ⚠️ Known edges: `taskpolicy` lives in `/usr/sbin/`; pins are not restored if the app is killed abnormally; brightness action degrades to a log line when DisplayServices symbols are unavailable

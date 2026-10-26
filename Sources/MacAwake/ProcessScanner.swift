@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Darwin
 
 /// 进程扫描：libproc 枚举 + sysctl KERN_PROCARGS2 拿完整命令行 + rusage 增量算 CPU%。
@@ -165,6 +166,43 @@ final class ProcessScanner {
     static func describe(pid: pid_t) -> String {
         guard let args = procArgs(pid: pid) else { return "PID \(pid)" }
         return displayName(of: pid, argsText: args)
+    }
+
+    // MARK: - 目标查找（自动化动作用）
+
+    /// 命令行/名称包含关键词的进程 PID（大小写不敏感；可用注入的快照避免重复扫描）
+    func pids(matchingKeyword keyword: String, in procs: [ProcInfo]? = nil) -> [pid_t] {
+        guard !keyword.isEmpty else { return [] }
+        let pool = procs ?? snapshot()
+        let myPID = ProcessInfo.processInfo.processIdentifier
+        return pool.compactMap { proc in
+            guard proc.pid != myPID,
+                  proc.argsText.localizedCaseInsensitiveContains(keyword)
+                  || proc.name.localizedCaseInsensitiveContains(keyword) else { return nil }
+            return proc.pid
+        }
+    }
+
+    /// 指定应用名下全部进程（主进程 + 同 bundle 的 Helper/渲染进程）
+    func pids(ofApp appName: String) -> [pid_t] {
+        guard !appName.isEmpty else { return [] }
+        let apps = NSWorkspace.shared.runningApplications.filter {
+            $0.activationPolicy == .regular
+            && $0.localizedName == appName
+            && $0.bundleIdentifier != Bundle.main.bundleIdentifier
+        }
+        guard let app = apps.first else {
+            // 找不到运行中的同名 App：退化成关键词匹配
+            return pids(matchingKeyword: appName)
+        }
+        guard let bundlePath = app.bundleURL?.path else { return [app.processIdentifier] }
+        let myPID = ProcessInfo.processInfo.processIdentifier
+        return snapshot().compactMap { proc in
+            guard proc.pid != myPID else { return nil }
+            guard let first = proc.argsText.split(separator: " ").first,
+                  first.contains("/") else { return nil }
+            return first.hasPrefix(bundlePath + "/") ? proc.pid : nil
+        }
     }
 
     // MARK: - rusage
