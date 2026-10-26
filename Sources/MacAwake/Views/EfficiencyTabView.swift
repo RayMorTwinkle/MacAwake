@@ -4,16 +4,23 @@ import MacAwakeCore
 /// 「能效调度」页：易用模式（App 列表一键钉核）+ 专业模式（规则/门控/平衡/日志）
 struct EfficiencyTabView: View {
     @ObservedObject var model: AppModel
+    @ObservedObject var engine: EfficiencyEngine
+    @ObservedObject var appPicker: AppPickerStore
+
+    init(model: AppModel, engine: EfficiencyEngine) {
+        self.model = model
+        self.engine = engine
+        self.appPicker = model.appPicker
+    }
 
     @AppStorage("efficiency.useSimpleMode") private var useSimpleMode = true
 
     var body: some View {
-        @ObservedObject var engine = model.efficiency
         VStack(alignment: .leading, spacing: 14) {
 
             controlBar
 
-            AppPickerCard(model: model)
+            AppPickerCard(model: model, appPicker: appPicker)
 
             if useSimpleMode {
                 Label("想按关键词自动监控、调平衡策略？切到专业模式", systemImage: "lightbulb")
@@ -28,8 +35,7 @@ struct EfficiencyTabView: View {
     // MARK: 顶部控制条
 
     private var controlBar: some View {
-        @ObservedObject var engine = model.efficiency
-        return HStack(spacing: 12) {
+        HStack(spacing: 12) {
             Button {
                 engine.isRunning ? engine.stop() : engine.start()
             } label: {
@@ -72,8 +78,7 @@ struct EfficiencyTabView: View {
     // MARK: 专业区
 
     private var proSection: some View {
-        @ObservedObject var engine = model.efficiency
-        return VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 14) {
             rulesCard(engine: engine)
             gatingCard(engine: engine)
             trackedCard(engine: engine)
@@ -204,6 +209,7 @@ struct EfficiencyTabView: View {
 
 private struct AppPickerCard: View {
     @ObservedObject var model: AppModel
+    @ObservedObject var appPicker: AppPickerStore
     @State private var query = ""
     @State private var expanded = false
 
@@ -211,8 +217,8 @@ private struct AppPickerCard: View {
 
     private var filtered: [AppPickerStore.RunningApp] {
         query.isEmpty
-            ? model.appPicker.apps
-            : model.appPicker.apps.filter { $0.name.localizedCaseInsensitiveContains(query) }
+            ? appPicker.apps
+            : appPicker.apps.filter { $0.name.localizedCaseInsensitiveContains(query) }
     }
 
     /// 折叠时只显示 CPU 最高的前几个；展开给全部（页面整体滚动，不用嵌套滚动）
@@ -221,7 +227,7 @@ private struct AppPickerCard: View {
     }
 
     var body: some View {
-        Card(title: "正在运行的应用（\(model.appPicker.apps.count) 个 · 点击即时生效，含全部子进程）", icon: "app.dashed") {
+        Card(title: "正在运行的应用（\(appPicker.apps.count) 个 · 点击即时生效，含全部子进程）", icon: "app.dashed") {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Image(systemName: "magnifyingglass")
@@ -240,7 +246,7 @@ private struct AppPickerCard: View {
                 } else {
                     VStack(spacing: 0) {
                         ForEach(visible) { app in
-                            AppRow(model: model, app: app)
+                            AppRow(model: model, appPicker: appPicker, app: app)
                                 .padding(.horizontal, 2)
                                 .padding(.vertical, 6)
                             Divider()
@@ -260,7 +266,7 @@ private struct AppPickerCard: View {
                     }
                 }
 
-                if let last = model.appPicker.lastLog {
+                if let last = appPicker.lastLog {
                     Label(last, systemImage: "checkmark.circle.fill")
                         .font(.caption)
                         .foregroundStyle(.green)
@@ -273,6 +279,7 @@ private struct AppPickerCard: View {
 
 private struct AppRow: View {
     @ObservedObject var model: AppModel
+    @ObservedObject var appPicker: AppPickerStore
     let app: AppPickerStore.RunningApp
 
     var body: some View {
@@ -308,26 +315,26 @@ private struct AppRow: View {
                     .frame(width: 44, alignment: .trailing)
             }
 
-            if model.appPicker.isWatched(app) {
+            if appPicker.isWatched(app) {
                 Chip(text: "监控中", color: .blue)
             }
 
             Button {
-                model.appPicker.limitNow(app)
+                appPicker.limitNow(app)
             } label: {
                 Label("钉小核", systemImage: "tortoise.fill")
             }
             .controlSize(.small)
 
             Button {
-                model.appPicker.restoreNow(app)
+                appPicker.restoreNow(app)
             } label: {
                 Label("恢复", systemImage: "hare.fill")
             }
             .controlSize(.small)
 
             Button {
-                model.appPicker.addToRules(app)
+                appPicker.addToRules(app)
             } label: {
                 Image(systemName: "eye")
             }

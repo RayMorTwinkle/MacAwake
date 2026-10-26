@@ -6,6 +6,7 @@ struct PowerTabView: View {
     @ObservedObject var model: AppModel
 
     @State private var customText = ""
+    @State private var preset: Int?
     @State private var loginError: String?
 
     var body: some View {
@@ -23,6 +24,7 @@ struct PowerTabView: View {
             heroCard
             timerCard
             infoCards
+            generalCard
 
             if let loginError {
                 Label(loginError, systemImage: "exclamationmark.triangle.fill")
@@ -47,16 +49,24 @@ struct PowerTabView: View {
             VStack(alignment: .leading, spacing: 7) {
                 Text(on ? "合盖不休眠" : "合盖正常休眠")
                     .font(.system(.largeTitle, design: .rounded).bold())
+                if let remain = model.remainingSeconds {
+                    // 剩余时间是 hero 卡的动态主角，给大号等宽数字
+                    Text("剩余 \(formatDuration(remain))")
+                        .font(.system(.title, design: .rounded).bold())
+                        .monospacedDigit()
+                        .foregroundStyle(.indigo)
+                }
                 HStack(spacing: 8) {
-                    if let remain = model.remainingSeconds {
-                        Chip(text: "剩余 \(formatDuration(remain))", color: .indigo)
-                    } else if on {
+                    if on && model.remainingSeconds == nil {
                         Chip(text: "不限时", color: .indigo)
-                    } else {
+                    } else if !on {
                         Chip(text: "系统默认", color: .secondary)
                     }
                     if model.controller.driftRepairCount > 0 {
                         Chip(text: "已被外部修改 \(model.controller.driftRepairCount) 次 · 均已自动恢复", color: .orange)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .minimumScaleFactor(0.8)
                     }
                 }
             }
@@ -83,20 +93,19 @@ struct PowerTabView: View {
     private var timerCard: some View {
         Card(title: "定时恢复休眠", icon: "timer") {
             VStack(alignment: .leading, spacing: 12) {
-                Picker("预设", selection: Binding<Int?>(
-                    get: { nil },
-                    set: { seconds in
-                        guard let seconds else { return }
-                        model.controller.turnOn(duration: seconds == -1 ? nil : Double(seconds))
-                    })) {
-                    Text("30 分钟").tag(Optional(30 * 60))
-                    Text("1 小时").tag(Optional(60 * 60))
-                    Text("2 小时").tag(Optional(2 * 60 * 60))
-                    Text("4 小时").tag(Optional(4 * 60 * 60))
-                    Text("不限时").tag(Optional(-1))
+                Picker("预设", selection: $preset) {
+                    Text("30 分钟").tag(Int?(30 * 60))
+                    Text("1 小时").tag(Int?(60 * 60))
+                    Text("2 小时").tag(Int?(2 * 60 * 60))
+                    Text("4 小时").tag(Int?(4 * 60 * 60))
+                    Text("不限时").tag(Int?(-1))
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .onChange(of: preset) { newValue in
+                    guard let seconds = newValue else { return }
+                    model.controller.turnOn(duration: seconds == -1 ? nil : Double(seconds))
+                }
 
                 HStack(spacing: 10) {
                     TextField("自定义时长（如 45m、1h30m、90）", text: $customText)
@@ -122,6 +131,24 @@ struct PowerTabView: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: 通用
+
+    private var generalCard: some View {
+        Card(title: "通用", icon: "gearshape") {
+            Toggle("开机启动", isOn: Binding(
+                get: { SMAppServiceUtil.isEnabled },
+                set: { _ in
+                    do {
+                        try SMAppServiceUtil.toggle()
+                        loginError = nil
+                    } catch {
+                        loginError = "开机启动切换失败：\(error.localizedDescription)"
+                    }
+                }
+            ))
         }
     }
 

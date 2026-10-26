@@ -141,33 +141,27 @@ struct MainTabView: View {
             .padding(.top, 14)
             .padding(.bottom, 12)
 
-            List {
+            List(selection: $page) {
                 ForEach(Page.allCases) { p in
-                    NavigationLink(value: p) {
-                        Label {
-                            Text(p.title)
-                        } icon: {
-                            Image(systemName: p.icon)
-                                .foregroundStyle(page == p ? AnyShapeStyle(p.tint.gradient) : AnyShapeStyle(Color.secondary))
-                                .frame(width: 20)
-                        }
+                    Label {
+                        Text(p.title)
+                    } icon: {
+                        Image(systemName: p.icon)
+                            .foregroundStyle(page == p ? AnyShapeStyle(p.tint.gradient) : AnyShapeStyle(Color.secondary))
+                            .frame(width: 20)
                     }
+                    .tag(p)
                     .listRowInsets(EdgeInsets(top: 5, leading: 12, bottom: 5, trailing: 8))
                 }
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
-            .navigationDestination(for: Page.self) { p in
-                detail(for: p)
-                    .environment(\.pageTint, p.tint)
-            }
             .safeAreaInset(edge: .bottom) {
                 batteryFooter
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
             }
         }
-        .onAppear { page = .power }
     }
 
     /// 侧边栏底部：电源快照（常显，全局可用信息）
@@ -237,8 +231,8 @@ struct MainTabView: View {
     private func content(_ p: Page) -> some View {
         switch p {
         case .power: PowerTabView(model: model)
-        case .efficiency: EfficiencyTabView(model: model)
-        case .automation: AutomationTabView(model: model)
+        case .efficiency: EfficiencyTabView(model: model, engine: model.efficiency)
+        case .automation: AutomationTabView(model: model, automation: model.automation)
         case .stats: StatsTabView(model: model)
         }
     }

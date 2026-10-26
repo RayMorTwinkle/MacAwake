@@ -4,11 +4,16 @@ import MacAwakeCore
 /// 「自动化」页：规则卡片列表 + 拼图块编辑器 + 运行记录
 struct AutomationTabView: View {
     @ObservedObject var model: AppModel
+    @ObservedObject var automation: AutomationEngine
+
+    init(model: AppModel, automation: AutomationEngine) {
+        self.model = model
+        self.automation = automation
+    }
 
     @State private var editingRule: AutomationRule?
 
     var body: some View {
-        @ObservedObject var automation = model.automation
         VStack(alignment: .leading, spacing: 14) {
 
             HStack(spacing: 10) {

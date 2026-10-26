@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 import MacAwakeCore
 
 /// 「统计」页：当前状态 + 聚合卡片网格 + 合盖事件列表
@@ -47,6 +48,9 @@ struct StatsTabView: View {
                 }
             }
 
+            // 近 7 天每日合盖时长
+            weeklyChart
+
             // 聚合网格
             let summary = stats.summary(days: rangeDays)
             let totals = stats.totals(days: rangeDays)
@@ -76,6 +80,54 @@ struct StatsTabView: View {
     private var currentEpisodeText: String? {
         guard let episode = model.stats.store.episodes.last, episode.endedAt == nil else { return nil }
         return formatInterval(episode.duration(now: model.now))
+    }
+
+    // MARK: 每日柱状图
+
+    private struct DailyMinute: Identifiable {
+        let day: Date
+        let label: String
+        let minutes: Double
+        var id: Date { day }
+    }
+
+    private var weeklyChart: some View {
+        Card(title: "近 7 天每日合盖时长（分钟）", icon: "chart.bar.fill") {
+            let data = Self.last7Days(store: model.stats.store)
+            if data.allSatisfy({ $0.minutes == 0 }) {
+                Text("还没有合盖记录。合盖后这里会按天累积。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 8)
+            } else {
+                Chart(data) { item in
+                    BarMark(
+                        x: .value("日期", item.label),
+                        y: .value("分钟", item.minutes)
+                    )
+                    .foregroundStyle(.green.gradient)
+                    .cornerRadius(3)
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading)
+                }
+                .frame(height: 150)
+            }
+        }
+    }
+
+    private static func last7Days(store: StatsStore) -> [DailyMinute] {
+        let cal = Calendar.current
+        let fmtDay = DateFormatter(); fmtDay.dateFormat = "yyyy-MM-dd"
+        let fmtLabel = DateFormatter(); fmtLabel.dateFormat = "MM/dd"
+        let today = cal.startOfDay(for: Date())
+        return (0..<7).reversed().compactMap { offset -> DailyMinute? in
+            guard let day = cal.date(byAdding: .day, value: -offset, to: today) else { return nil }
+            let key = fmtDay.string(from: day)
+            let seconds = store.daily[key]?.lidClosedSeconds ?? 0
+            return DailyMinute(day: day, label: fmtLabel.string(from: day), minutes: seconds / 60)
+        }
     }
 
     // MARK: 事件列表
